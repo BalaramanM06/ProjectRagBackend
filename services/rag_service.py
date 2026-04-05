@@ -9,63 +9,49 @@ from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from core.database import engine
 
-# ==========================================
-# 1. Setup Embeddings
-# ==========================================
-# We use a free huggingface model that is highly efficient for document similarity
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-
-# ==========================================
-# 2. Setup VectorStore (PostgreSQL pgvector)
-# ==========================================
+_embeddings = None
+_vectorstore = None
 collection_name = "pdf_rag_collection"
 
-# Connection parameter uses the SQLAlchemy engine we built in core/database.py
-vectorstore = PGVector(
-    embeddings=embeddings,
-    collection_name=collection_name,
-    connection=engine,
-    use_jsonb=True,
-)
+def get_embeddings():
+    global _embeddings
+    if _embeddings is None:
+        _embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    return _embeddings
 
-
-# ==========================================
-# 3. Setup LLM (Groq)
-# ==========================================
-# Ensure we instantiate exactly when needed to catch env keys if they load late
+def get_vectorstore():
+    global _vectorstore
+    if _vectorstore is None:
+        _vectorstore = PGVector(
+            embeddings=get_embeddings(),
+            collection_name=collection_name,
+            connection=engine,
+            use_jsonb=True,
+        )
+    return _vectorstore
 def get_llm():
     return ChatGroq(
         model="llama-3.3-70b-versatile", 
         api_key=os.getenv("GROQ_API_KEY")
     )
 
-
-# ==========================================
-# 4. Core Features
-# ==========================================
 def process_and_store_pdf(file_path: str, workspace_id: int) -> int:
     """
     Loads a PDF, splits it into chunks, embedded them, and stores them in PostgreSQL.
     Returns the number of chunks processed.
     """
-    # Load the PDF Document
     loader = PyPDFLoader(file_path)
     docs = loader.load()
     
-    # Split the document into 1000-character chunks with a 200-character overlap
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000, 
         chunk_overlap=200
     )
     splits = text_splitter.split_documents(docs)
     
-    # Add workspace_id metadata so we can isolate Vector searches 
     for split in splits:
         split.metadata["workspace_id"] = workspace_id
-        
-    # Store the chunks securely into Supabase Vector DB
-    vectorstore.add_documents(splits)
+    get_vectorstore().add_documents(splits)
     
     return len(splits)
 
@@ -77,15 +63,11 @@ def get_chat_response(message: str, workspace_id: int, history: list = None) -> 
     """
     llm = get_llm()
     
-    # Format history string for simplicity
     history_str = ""
     if history:
         for role, content in history:
             history_str += f"{role.capitalize()}: {content}\n"
-
-    # Create a retriever that pulls the Top 4 most relevant chunks
-    # CRITICAL: Isolate context per workspace securely using metadata tag
-    retriever = vectorstore.as_retriever(
+    retriever = get_vectorstore().as_retriever(
         search_kwargs={
             "k": 4,
             "filter": {"workspace_id": workspace_id}
