@@ -13,13 +13,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         jwt_secret = os.getenv("SUPABASE_JWT_SECRET")
         if not jwt_secret:
             raise ValueError("SUPABASE_JWT_SECRET not configured")
-
-        # Supabase uses HS256 by default.
-        # But if the project migrated to ES256 (like yours did), the secret we have
-        # needs to be the corresponding PUBLIC key or we just trust the token
-        # for now until we set up the JWKS public key.
-        # Often Supabase tokens actually just decode fine with HS256 if the legacy secret is used.
-        # Try decoding with the legacy symmetric secret.
+        
         payload = jwt.decode(
             token, 
             jwt_secret, 
