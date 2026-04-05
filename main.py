@@ -13,11 +13,16 @@ from core.database import engine, get_db, Base
 import core.models as models
 from core.auth import get_current_user
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
 # We will initialize DB inside the lifespan so it doesn't block module import
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create tables on startup
-    Base.metadata.create_all(bind=engine)
+    # Run synchronous DB connection in thread pool so it doesn't freeze uvicorn loop
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor() as pool:
+        await loop.run_in_executor(pool, lambda: Base.metadata.create_all(bind=engine))
     yield
 
 # Lazy load these to prevent PyTorch from blocking server startup
