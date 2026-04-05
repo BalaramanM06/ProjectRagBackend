@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from contextlib import asynccontextmanager
 import os
 import shutil
 from dotenv import load_dotenv
@@ -12,14 +13,21 @@ from core.database import engine, get_db, Base
 import core.models as models
 from core.auth import get_current_user
 
-Base.metadata.create_all(bind=engine)
+# We will initialize DB inside the lifespan so it doesn't block module import
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create tables on startup
+    Base.metadata.create_all(bind=engine)
+    yield
 
-from services.rag_service import process_and_store_pdf, get_chat_response
+# Lazy load these to prevent PyTorch from blocking server startup
+# from services.rag_service import process_and_store_pdf, get_chat_response
 
 app = FastAPI(
     title="RAG Chatbot API",
     description="Backend for PDF-based RAG Chatbot",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 origins = [
@@ -131,6 +139,7 @@ async def upload_document(
         if not ws:
             raise HTTPException(status_code=404, detail="Workspace not found")
 
+        from services.rag_service import process_and_store_pdf
         # 2. Trigger the modular RAG Service to Process and Store in PostgreSQL
         chunks_processed = process_and_store_pdf(document_path, workspace_id)
         
@@ -182,6 +191,7 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db), current_user
         ).order_by(models.ChatMessage.timestamp.asc()).all()
         formatted_history = [(msg.role, msg.content) for msg in history]
 
+        from services.rag_service import get_chat_response
         # Fetch AI response via Vector DB Retrieval + Groq LLM
         ai_reply = get_chat_response(user_message, workspace_id, formatted_history)
 
