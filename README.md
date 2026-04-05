@@ -58,3 +58,4 @@ uvicorn main:app --reload
 ```
 
 The API will be available at `http://localhost:8000`. You can test endpoints directly and interactively via the built-in Swagger UI at `http://localhost:8000/docs`.
+ 
